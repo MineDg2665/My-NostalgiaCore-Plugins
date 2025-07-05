@@ -3,12 +3,21 @@
 __PocketMine Plugin__
 name=WorldGuard
 description=Plugin for managing private regions
-version=1.1
+version=1.2
 author=MineDg
 class=WorldGuard
 apiversion=12.1
 */
 
+/*
+
+	1.2
+	* Added flags
+
+	1.1
+	* Bug Fix
+	
+*/
 class WorldGuard implements Plugin {
     private $api;
     private $db;
@@ -33,7 +42,10 @@ class WorldGuard implements Plugin {
             z1 INTEGER,
             x2 INTEGER,
             y2 INTEGER,
-            z2 INTEGER
+            z2 INTEGER,
+            pvp INTEGER DEFAULT 1,
+            use INTEGER DEFAULT 1,
+            break INTEGER DEFAULT 1
         );");
     }
 
@@ -52,7 +64,8 @@ class WorldGuard implements Plugin {
         }
 
         if ($cmd == "rg") {
-            switch (array_shift($params)) {
+            $subcmd = strtolower(array_shift($params));
+            switch ($subcmd) {
                 case 'i':
                     return $this->infoCommand($issuer, $params);
                 case 'addowner':
@@ -73,28 +86,71 @@ class WorldGuard implements Plugin {
                     return $this->removeRegion($issuer, $params);
                 case 'list':
                     return $this->listRegions($issuer);
+                case 'flag':
+                    return $this->flagCommand($issuer, $params);
                 default:
-                    return "/rg claim <region>: Claim a region.
-/rg remove <region>: Remove a region.
-/rg addmember <region> <player>: Add a member.
-/rg addowner <region> <player>: Add an owner.
-/rg removemember <region> <player>: Remove a member.
-/rg removeowner <region> <player>: Remove an owner.
-/rg pos1: Set the first position.
-/rg pos2: Set the second position.
-/rg list: List regions.";
+                    return "/rg claim <region> - Claim a region.\n".
+                           "/rg remove <region> - Remove a region.\n".
+                           "/rg addmember <region> <player> - Add a member.\n".
+                           "/rg addowner <region> <player> - Add an owner.\n".
+                           "/rg removemember <region> <player> - Remove a member.\n".
+                           "/rg removeowner <region> <player> - Remove an owner.\n".
+                           "/rg pos1 - Set the first position.\n".
+                           "/rg pos2 - Set the second position.\n".
+                           "/rg list - List regions.\n".
+                           "/rg flag <region> <flag> <value> - Set a flag for a region.";
             }
         }
         return "Command not recognized.";
     }
 
-    private function infoCommand($issuer, $params) {
+    private function flagCommand(Player $issuer, $params) {
+        if (count($params) < 3) {
+            return "Usage: /rg flag <region> <flag> <value>";
+        }
+
+        $regionName = array_shift($params);
+        $flag = strtolower(array_shift($params));
+        $value = strtolower(array_shift($params));
+
+        $validFlags = ["pvp", "use", "break"];
+        $validValues = ["true", "false", "on", "off"];
+
+        if (!in_array($flag, $validFlags)) {
+            return "Invalid flag. Valid flags: pvp, use, break.";
+        }
+
+        if (!in_array($value, $validValues)) {
+            return "Invalid value. Use true/false or on/off.";
+        }
+
+        $intValue = ($value === "true" || $value === "on") ? 1 : 0;
+
+        $result = $this->db->query("SELECT * FROM regions WHERE name = '$regionName';");
+        $region = $result->fetchArray(SQLITE3_ASSOC);
+        if (!$region) {
+            return "Region '$regionName' not found.";
+        }
+        if ($region['owner'] !== $issuer->username) {
+            return "You are not the owner of this region.";
+        }
+
+        $flagEscaped = SQLite3::escapeString($flag);
+        $this->db->exec("UPDATE regions SET $flagEscaped = $intValue WHERE name = '$regionName';");
+
+        return "Flag '$flag' set to ".($intValue ? "true" : "false")." for region '$regionName'.";
+    }
+
+    public function infoCommand($issuer, $params) {
         $regionName = array_shift($params);
         if ($regionName) {
             $result = $this->db->query("SELECT * FROM regions WHERE name = '$regionName';");
             $region = $result->fetchArray(SQLITE3_ASSOC);
             if ($region) {
-                return "Region: {$region['name']}, Owner: {$region['owner']}, Members: {$region['members']}, World: {$region['world']}, Coordinates: ({$region['x1']}, {$region['y1']}, {$region['z1']}) - ({$region['x2']}, {$region['y2']}, {$region['z2']})";
+                $flags = "Flags: pvp=" . ($region['pvp'] ? "true" : "false") .
+                         ", use=" . ($region['use'] ? "true" : "false") .
+                         ", break=" . ($region['break'] ? "true" : "false");
+                return "Region: {$region['name']}, Owner: {$region['owner']}, Members: {$region['members']}, World: {$region['world']}, Coordinates: ({$region['x1']}, {$region['y1']}, {$region['z1']}) - ({$region['x2']}, {$region['y2']}, {$region['z2']})\n$flags";
             } else {
                 return "Region '$regionName' not found.";
             }
@@ -103,7 +159,10 @@ class WorldGuard implements Plugin {
             $result = $this->db->query("SELECT * FROM regions WHERE world = '{$playerPosition->level->getName()}' AND x1 <= {$playerPosition->x} AND x2 >= {$playerPosition->x} AND y1 <= {$playerPosition->y} AND y2 >= {$playerPosition->y} AND z1 <= {$playerPosition->z} AND z2 >= {$playerPosition->z};");
             $region = $result->fetchArray(SQLITE3_ASSOC);
             if ($region) {
-                return "You are in region: {$region['name']}, Owner: {$region['owner']}, Members: {$region['members']}, World: {$region['world']}.";
+                $flags = "Flags: pvp=" . ($region['pvp'] ? "true" : "false") .
+                         ", use=" . ($region['use'] ? "true" : "false") .
+                         ", break=" . ($region['break'] ? "true" : "false");
+                return "You are in region: {$region['name']}, Owner: {$region['owner']}, Members: {$region['members']}, World: {$region['world']}.\n$flags";
             } else {
                 return "You are not in any region.";
             }
@@ -112,12 +171,12 @@ class WorldGuard implements Plugin {
 
     private function setPos1($issuer) {
         $this->pos1 = [round($issuer->entity->x)-0.5, round($issuer->entity->y)-1, round($issuer->entity->z)-0.5];
-        return "Position 1 set.";
+        return "Position 1 set in $this->pos1.";
     }
 
     private function setPos2($issuer) {
         $this->pos2 = [round($issuer->entity->x)-0.5, round($issuer->entity->y)-1, round($issuer->entity->z)-0.5];
-        return "Position 2 set.";
+        return "Position 2 set in $this->pos2.";
     }
 
     private function claimRegion($issuer, $params) {
@@ -132,7 +191,7 @@ class WorldGuard implements Plugin {
                 $y2 = max($this->pos1[1], $this->pos2[1]);
                 $z2 = max($this->pos1[2], $this->pos2[2]);
 
-                $this->db->exec("INSERT INTO regions (name, owner, members, world, x1, y1, z1, x2, y2, z2) VALUES ('$regionName', '{$issuer->username}', '', '$worldName', $x1, $y1, $z1, $x2, $y2, $z2);");
+                $this->db->exec("INSERT INTO regions (name, owner, members, world, x1, y1, z1, x2, y2, z2, pvp, use, break) VALUES ('$regionName', '{$issuer->username}', '', '$worldName', $x1, $y1, $z1, $x2, $y2, $z2, 1, 1, 1);");
                 return "Region '$regionName' claimed in world '$worldName'.";
             } else {
                 return "Please set positions 1 and 2.";
@@ -254,9 +313,12 @@ class WorldGuard implements Plugin {
         $region = $this->getRegionAtPosition($target->x, $target->y, $target->z, $player->level->getName());
 
         if ($region) {
+            // Check 'use' flag for block touch (interact)
             if ($region['owner'] !== $player->username && !in_array($player->username, explode(',', $region['members']))) {
-                $player->sendChat("You do not have permission to interact with this region.");
-                return false;
+                if (!$region['use']) {
+                    $player->sendChat("You do not have permission to use blocks in this region.");
+                    return false;
+                }
             }
         }
     }
@@ -264,13 +326,33 @@ class WorldGuard implements Plugin {
     public function handleBlockPlace($data, $event) {
         $player = $data["player"];
         $target = $data["target"];
-        return $this->checkRegionPermission($player, $target, "place");
+        $region = $this->getRegionAtPosition($target->x, $target->y, $target->z, $player->level->getName());
+
+        if ($region) {
+            if ($region['owner'] !== $player->username && !in_array($player->username, explode(',', $region['members']))) {
+                if (!$region['break']) {
+                    $player->sendChat("You do not have permission to place blocks in this region.");
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     public function handleBlockBreak($data, $event) {
         $player = $data["player"];
         $target = $data["target"];
-        return $this->checkRegionPermission($player, $target, "break");
+        $region = $this->getRegionAtPosition($target->x, $target->y, $target->z, $player->level->getName());
+
+        if ($region) {
+            if ($region['owner'] !== $player->username && !in_array($player->username, explode(',', $region['members']))) {
+                if (!$region['break']) {
+                    $player->sendChat("You do not have permission to break blocks in this region.");
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     private function checkRegionPermission(Player $player, Block $target, $action) {
@@ -294,4 +376,3 @@ class WorldGuard implements Plugin {
         $this->db->close();
     }
 }
-

@@ -136,7 +136,8 @@ class WorldGuard implements Plugin {
         }
 
         $flagEscaped = SQLite3::escapeString($flag);
-        $this->db->exec("UPDATE regions SET $flagEscaped = $intValue WHERE name = '$regionName';");
+		$regionNameEscaped = SQLite3::escapeString($regionName);
+		$this->db->exec("UPDATE regions SET \"$flagEscaped\" = $intValue WHERE name = '$regionNameEscaped';");
 
         return "Flag '$flag' set to ".($intValue ? "true" : "false")." for region '$regionName'.";
     }
@@ -171,12 +172,12 @@ class WorldGuard implements Plugin {
 
     private function setPos1($issuer) {
         $this->pos1 = [round($issuer->entity->x)-0.5, round($issuer->entity->y)-1, round($issuer->entity->z)-0.5];
-        return "Position 1 set in $this->pos1.";
+        return "Position 1 set in " . (round($issuer->entity->x) - 0.5) . ", " . (round($issuer->entity->y) - 1) . ", " . (round($issuer->entity->z) - 0.5) . ".";
     }
 
     private function setPos2($issuer) {
         $this->pos2 = [round($issuer->entity->x)-0.5, round($issuer->entity->y)-1, round($issuer->entity->z)-0.5];
-        return "Position 2 set in $this->pos2.";
+        return "Position 2 set in " . (round($issuer->entity->x) - 0.5) . ", " . (round($issuer->entity->y) - 1) . ", " . (round($issuer->entity->z) - 0.5) . ".";
     }
 
     private function claimRegion($issuer, $params) {
@@ -313,7 +314,6 @@ class WorldGuard implements Plugin {
         $region = $this->getRegionAtPosition($target->x, $target->y, $target->z, $player->level->getName());
 
         if ($region) {
-            // Check 'use' flag for block touch (interact)
             if ($region['owner'] !== $player->username && !in_array($player->username, explode(',', $region['members']))) {
                 if (!$region['use']) {
                     $player->sendChat("You do not have permission to use blocks in this region.");

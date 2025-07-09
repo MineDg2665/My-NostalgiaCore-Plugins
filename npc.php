@@ -1,12 +1,12 @@
 <?php
 /*
 __PocketMine Plugin__
-name=NCNPC
-description=NostalgiaCore NPC plugin
-version=1.0
-author=MineDg (Based on a plugin by ArkQuark)
+name=NPC
+description=A plugin that adds custom NPCs
+version=1.1
+author=MineDg
 class=NPCMain
-apiversion=12.1,12.2
+apiversion=12.1
 */
 
 class NPCMain implements Plugin {
@@ -292,11 +292,14 @@ class NPCEntity extends Zombie {
     }
     
     public function looking() {
-        if($this->data["look"] ?? false) {
-            $this->ai->mobController->lookOn($this->findTarget($this, 10));
-        }
-    }
-    
+		if (($this->data["look"] ?? false) && $this->ai !== null && isset($this->ai->mobController) && $this->ai->mobController !== null) {
+			$target = $this->findTarget($this, 10);
+			if($target !== null) {
+				$this->ai->mobController->lookOn($target);
+			}
+		}
+	}
+   
     protected function findTarget($e, $r = 5) {
         $svd = null;
         $svdDist = -1;

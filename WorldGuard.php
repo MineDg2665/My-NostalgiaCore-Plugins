@@ -3,12 +3,14 @@
 __PocketMine Plugin__
 name=WorldGuard
 description=Plugin for managing private regions.
-version=1.3
+version=1.4
 author=MineDg
 class=WorldGuard
 apiversion=12.1
 */
+
 /* 
+1.4 * Some fixes
 1.3 * Added subregions
 1.2 * Added flags 
 1.1 * Bug Fix 
@@ -23,10 +25,11 @@ class WorldGuard implements Plugin {
     
     public function __construct(ServerAPI $api, $server = false) {
         $this->api = $api;
-        $this->path = __DIR__ . "/WorldGuard/";
-        if (!file_exists($this->path)) {
-            mkdir($this->path, 0755, true);
-        }
+    }
+    
+    public function init() {
+        $this->path = $this->api->plugin->configPath($this);
+        
         $this->db = new SQLite3($this->path . "regions.db");
         $this->db->exec("CREATE TABLE IF NOT EXISTS regions (
             name TEXT PRIMARY KEY,
@@ -41,22 +44,20 @@ class WorldGuard implements Plugin {
             z2 INTEGER,
             parent TEXT DEFAULT NULL,
             pvp INTEGER DEFAULT 1,
-            use INTEGER DEFAULT 1,
-            break INTEGER DEFAULT 1,
+            use_flag INTEGER DEFAULT 0,
+            break_flag INTEGER DEFAULT 0,
             FOREIGN KEY (parent) REFERENCES regions(name) ON DELETE SET NULL
         );");
         
         $this->db->exec("CREATE INDEX IF NOT EXISTS idx_parent ON regions(parent);");
-    }
-    
-    public function init() {
+        
         $this->api->console->register("rg", "[subcmd] ...", array($this, "command"));
         $this->api->console->alias("region", "rg");
-        $this->api->addHandler("player.block.touch", array($this, "handleBlockTouch"), 10);
-        $this->api->addHandler("player.block.place", array($this, "handleBlockPlace"), 10);
-        $this->api->addHandler("player.block.break", array($this, "handleBlockBreak"), 10);
-        $this->api->addHandler("player.interact", array($this, "handlePlayerInteract"), 10);
-        $this->api->addHandler("player.attack", array($this, "handlePlayerAttack"), 10);
+        $this->api->addHandler("player.block.touch", array($this, "handleBlockTouch"), 0);
+        $this->api->addHandler("player.block.place", array($this, "handleBlockPlace"), 0);
+        $this->api->addHandler("player.block.break", array($this, "handleBlockBreak"), 0);
+        $this->api->addHandler("player.interact", array($this, "handlePlayerInteract"), 0);
+        $this->api->addHandler("player.attack", array($this, "handlePlayerAttack"), 0);
         $this->api->ban->cmdWhitelist("rg");
     }
     
@@ -123,6 +124,22 @@ class WorldGuard implements Plugin {
         return "Command not recognized.";
     }
     
+    private function setPos1($issuer) {
+        $x = (int) floor($issuer->entity->x);
+        $y = (int) floor($issuer->entity->y) - 1;
+        $z = (int) floor($issuer->entity->z);
+        $this->pos1 = [$x, $y, $z];
+        return "Position 1 set to $x, $y, $z.";
+    }
+    
+    private function setPos2($issuer) {
+        $x = (int) floor($issuer->entity->x);
+        $y = (int) floor($issuer->entity->y) - 1;
+        $z = (int) floor($issuer->entity->z);
+        $this->pos2 = [$x, $y, $z];
+        return "Position 2 set to $x, $y, $z.";
+    }
+    
     private function setParentCommand(Player $issuer, $params) {
         if (count($params) < 2) {
             return "Usage: /rg setparent <child_region> <parent_region>";
@@ -137,25 +154,11 @@ class WorldGuard implements Plugin {
         $parentResult = $this->db->query("SELECT * FROM regions WHERE name = '$parentName';");
         $parent = $parentResult->fetchArray(SQLITE3_ASSOC);
         
-        if (!$child) {
-            return "Child region '$childName' not found.";
-        }
-        
-        if (!$parent) {
-            return "Parent region '$parentName' not found.";
-        }
-        
-        if ($child['owner'] !== $issuer->username) {
-            return "You are not the owner of region '$childName'.";
-        }
-        
-        if ($parent['owner'] !== $issuer->username) {
-            return "You are not the owner of region '$parentName'.";
-        }
-        
-        if ($child['world'] !== $parent['world']) {
-            return "Regions must be in the same world.";
-        }
+        if (!$child) return "Child region '$childName' not found.";
+        if (!$parent) return "Parent region '$parentName' not found.";
+        if ($child['owner'] !== $issuer->username) return "You are not the owner of region '$childName'.";
+        if ($parent['owner'] !== $issuer->username) return "You are not the owner of region '$parentName'.";
+        if ($child['world'] !== $parent['world']) return "Regions must be in the same world.";
         
         if ($child['x1'] < $parent['x1'] || $child['x2'] > $parent['x2'] ||
             $child['y1'] < $parent['y1'] || $child['y2'] > $parent['y2'] ||
@@ -168,7 +171,6 @@ class WorldGuard implements Plugin {
         }
         
         $this->db->exec("UPDATE regions SET parent = '$parentName' WHERE name = '$childName';");
-        
         return "Parent of '$childName' set to '$parentName'.";
     }
     
@@ -178,24 +180,14 @@ class WorldGuard implements Plugin {
         }
         
         $regionName = SQLite3::escapeString(array_shift($params));
-        
         $result = $this->db->query("SELECT * FROM regions WHERE name = '$regionName';");
         $region = $result->fetchArray(SQLITE3_ASSOC);
         
-        if (!$region) {
-            return "Region '$regionName' not found.";
-        }
-        
-        if ($region['owner'] !== $issuer->username) {
-            return "You are not the owner of this region.";
-        }
-        
-        if (!$region['parent']) {
-            return "Region '$regionName' doesn't have a parent.";
-        }
+        if (!$region) return "Region '$regionName' not found.";
+        if ($region['owner'] !== $issuer->username) return "You are not the owner of this region.";
+        if (!$region['parent']) return "Region '$regionName' doesn't have a parent.";
         
         $this->db->exec("UPDATE regions SET parent = NULL WHERE name = '$regionName';");
-        
         return "Parent removed from region '$regionName'.";
     }
     
@@ -205,7 +197,6 @@ class WorldGuard implements Plugin {
         }
         
         $regionName = SQLite3::escapeString(array_shift($params));
-        
         $result = $this->db->query("SELECT * FROM regions WHERE parent = '$regionName';");
         $children = [];
         
@@ -215,92 +206,72 @@ class WorldGuard implements Plugin {
         
         if (count($children) > 0) {
             return "Children of '$regionName':\n" . implode("\n", $children);
-        } else {
-            return "Region '$regionName' has no children.";
         }
+        return "Region '$regionName' has no children.";
     }
     
     private function hasCircularDependency($childName, $parentName) {
         $current = $parentName;
+        $visited = [];
         while ($current) {
-            if ($current === $childName) {
-                return true;
-            }
+            if ($current === $childName) return true;
+            if (isset($visited[$current])) return true;
+            $visited[$current] = true;
             
-            $result = $this->db->query("SELECT parent FROM regions WHERE name = '$current';");
+            $escaped = SQLite3::escapeString($current);
+            $result = $this->db->query("SELECT parent FROM regions WHERE name = '$escaped';");
             $row = $result->fetchArray(SQLITE3_ASSOC);
             $current = $row ? $row['parent'] : null;
         }
-        
         return false;
     }
     
-    private function getRegionAtPosition($x, $y, $z, $world) {
-        $result = $this->db->query("SELECT * FROM regions WHERE world = '$world';");
-        
+    private function getAllRegionsInWorld($world) {
+        $worldEscaped = SQLite3::escapeString($world);
+        $result = $this->db->query("SELECT * FROM regions WHERE world = '$worldEscaped';");
         $allRegions = [];
         while ($region = $result->fetchArray(SQLITE3_ASSOC)) {
             $allRegions[] = $region;
         }
+        return $allRegions;
+    }
+    
+    private function isInsideRegion($x, $y, $z, $region) {
+        return $x >= $region['x1'] && $x <= $region['x2'] &&
+               $y >= $region['y1'] && $y <= $region['y2'] &&
+               $z >= $region['z1'] && $z <= $region['z2'];
+    }
+    
+    private function getRegionAtPosition($x, $y, $z, $world) {
+        $bx = (int) floor($x);
+        $by = (int) floor($y);
+        $bz = (int) floor($z);
         
-        if (empty($allRegions)) {
-            return null;
-        }
+        $allRegions = $this->getAllRegionsInWorld($world);
+        
+        if (empty($allRegions)) return null;
         
         $containingRegions = [];
         foreach ($allRegions as $region) {
-            $minX = min($region['x1'], $region['x2']);
-            $maxX = max($region['x1'], $region['x2']);
-            $minY = min($region['y1'], $region['y2']);
-            $maxY = max($region['y1'], $region['y2']);
-            $minZ = min($region['z1'], $region['z2']);
-            $maxZ = max($region['z1'], $region['z2']);
-            
-            if ($x >= $minX && $x <= $maxX &&
-                $y >= $minY && $y <= $maxY &&
-                $z >= $minZ && $z <= $maxZ) {
+            if ($this->isInsideRegion($bx, $by, $bz, $region)) {
                 $containingRegions[] = $region;
             }
         }
         
-        if (empty($containingRegions)) {
-            return null;
-        }
-        
-        if (count($containingRegions) === 1) {
-            return $containingRegions[0];
-        }
+        if (empty($containingRegions)) return null;
+        if (count($containingRegions) === 1) return $containingRegions[0];
         
         $deepestRegion = null;
         $deepestDepth = -1;
         
         foreach ($containingRegions as $region) {
-            $depth = 0;
-            $currentRegion = $region;
-            
-            while ($currentRegion['parent']) {
-                $depth++;
-                $parentFound = false;
-                foreach ($allRegions as $r) {
-                    if ($r['name'] === $currentRegion['parent']) {
-                        $currentRegion = $r;
-                        $parentFound = true;
-                        break;
-                    }
-                }
-                if (!$parentFound) {
-                    break;
-                }
-            }
+            $depth = $this->getRegionDepth($region, $allRegions);
             
             if ($depth > $deepestDepth) {
                 $deepestDepth = $depth;
                 $deepestRegion = $region;
-            }
-            elseif ($depth === $deepestDepth && $deepestRegion) {
-                $currentVolume = $this->getRegionVolume($region);
-                $deepestVolume = $this->getRegionVolume($deepestRegion);
-                if ($currentVolume < $deepestVolume) {
+            } elseif ($depth === $deepestDepth && $deepestRegion) {
+                if ($this->getRegionVolume($region) < $this->getRegionVolume($deepestRegion)) {
                     $deepestRegion = $region;
                 }
             }
@@ -309,38 +280,48 @@ class WorldGuard implements Plugin {
         return $deepestRegion ?: $containingRegions[0];
     }
     
+    private function getRegionDepth($region, $allRegions) {
+        $depth = 0;
+        $current = $region;
+        $visited = [];
+        
+        while ($current['parent']) {
+            if (isset($visited[$current['name']])) break;
+            $visited[$current['name']] = true;
+            $depth++;
+            
+            $parentFound = false;
+            foreach ($allRegions as $r) {
+                if ($r['name'] === $current['parent']) {
+                    $current = $r;
+                    $parentFound = true;
+                    break;
+                }
+            }
+            if (!$parentFound) break;
+        }
+        
+        return $depth;
+    }
+    
     private function getRegionVolume($region) {
-        $width = abs($region['x2'] - $region['x1']);
-        $height = abs($region['y2'] - $region['y1']);
-        $depth = abs($region['z2'] - $region['z1']);
+        $width = abs($region['x2'] - $region['x1']) + 1;
+        $height = abs($region['y2'] - $region['y1']) + 1;
+        $depth = abs($region['z2'] - $region['z1']) + 1;
         return $width * $height * $depth;
     }
     
     private function regionsAtCommand(Player $issuer, $params) {
-        $playerPosition = $issuer->entity;
-        $x = $playerPosition->x;
-        $y = $playerPosition->y;
-        $z = $playerPosition->z;
-        $world = $playerPosition->level->getName();
+        $x = (int) floor($issuer->entity->x);
+        $y = (int) floor($issuer->entity->y);
+        $z = (int) floor($issuer->entity->z);
+        $world = $issuer->entity->level->getName();
         
-        $result = $this->db->query("SELECT * FROM regions WHERE world = '$world';");
-        $allRegions = [];
-        while ($region = $result->fetchArray(SQLITE3_ASSOC)) {
-            $allRegions[] = $region;
-        }
+        $allRegions = $this->getAllRegionsInWorld($world);
         
         $containingRegions = [];
         foreach ($allRegions as $region) {
-            $minX = min($region['x1'], $region['x2']);
-            $maxX = max($region['x1'], $region['x2']);
-            $minY = min($region['y1'], $region['y2']);
-            $maxY = max($region['y1'], $region['y2']);
-            $minZ = min($region['z1'], $region['z2']);
-            $maxZ = max($region['z1'], $region['z2']);
-            
-            if ($x >= $minX && $x <= $maxX &&
-                $y >= $minY && $y <= $maxY &&
-                $z >= $minZ && $z <= $maxZ) {
+            if ($this->isInsideRegion($x, $y, $z, $region)) {
                 $containingRegions[] = $region;
             }
         }
@@ -349,7 +330,7 @@ class WorldGuard implements Plugin {
             return "No regions at your position.";
         }
         
-        $output = "Regions at your position (" . round($x) . ", " . round($y) . ", " . round($z) . "):\n";
+        $output = "Regions at your position ($x, $y, $z):\n";
         foreach ($containingRegions as $region) {
             $parentInfo = $region['parent'] ? " (Parent: " . $region['parent'] . ")" : "";
             $volume = $this->getRegionVolume($region);
@@ -368,143 +349,170 @@ class WorldGuard implements Plugin {
         $regionName = array_shift($params);
         $worldName = $issuer->entity->level->getName();
         
-        if ($regionName) {
-            if (isset($this->pos1) && isset($this->pos2)) {
-                $x1 = min($this->pos1[0], $this->pos2[0]);
-                $y1 = min($this->pos1[1], $this->pos2[1]);
-                $z1 = min($this->pos1[2], $this->pos2[2]);
-                $x2 = max($this->pos1[0], $this->pos2[0]);
-                $y2 = max($this->pos1[1], $this->pos2[1]);
-                $z2 = max($this->pos1[2], $this->pos2[2]);
+        if (!$regionName) {
+            return "Usage: /rg claim <region>";
+        }
+        
+        if (!isset($this->pos1) || !isset($this->pos2)) {
+            return "Please set positions 1 and 2.";
+        }
+        
+        $x1 = min($this->pos1[0], $this->pos2[0]);
+        $y1 = min($this->pos1[1], $this->pos2[1]);
+        $z1 = min($this->pos1[2], $this->pos2[2]);
+        $x2 = max($this->pos1[0], $this->pos2[0]);
+        $y2 = max($this->pos1[1], $this->pos2[1]);
+        $z2 = max($this->pos1[2], $this->pos2[2]);
+        
+        $worldEscaped = SQLite3::escapeString($worldName);
+        $result = $this->db->query("SELECT * FROM regions WHERE world = '$worldEscaped';");
+        $overlappingRegions = [];
+        $insideRegions = [];
+        
+        while ($existingRegion = $result->fetchArray(SQLITE3_ASSOC)) {
+            $eMinX = $existingRegion['x1'];
+            $eMaxX = $existingRegion['x2'];
+            $eMinY = $existingRegion['y1'];
+            $eMaxY = $existingRegion['y2'];
+            $eMinZ = $existingRegion['z1'];
+            $eMaxZ = $existingRegion['z2'];
+            
+            if (!($x2 < $eMinX || $x1 > $eMaxX ||
+                  $y2 < $eMinY || $y1 > $eMaxY ||
+                  $z2 < $eMinZ || $z1 > $eMaxZ)) {
                 
-                $result = $this->db->query("SELECT * FROM regions WHERE world = '$worldName';");
-                $overlappingRegions = [];
-                $insideRegions = [];
-                
-                while ($existingRegion = $result->fetchArray(SQLITE3_ASSOC)) {
-                    $minX = min($existingRegion['x1'], $existingRegion['x2']);
-                    $maxX = max($existingRegion['x1'], $existingRegion['x2']);
-                    $minY = min($existingRegion['y1'], $existingRegion['y2']);
-                    $maxY = max($existingRegion['y1'], $existingRegion['y2']);
-                    $minZ = min($existingRegion['z1'], $existingRegion['z2']);
-                    $maxZ = max($existingRegion['z1'], $existingRegion['z2']);
-                    
-                    if (!($x2 < $minX || $x1 > $maxX ||
-                          $y2 < $minY || $y1 > $maxY ||
-                          $z2 < $minZ || $z1 > $maxZ)) {
-                        
-                        if ($x1 >= $minX && $x2 <= $maxX &&
-                            $y1 >= $minY && $y2 <= $maxY &&
-                            $z1 >= $minZ && $z2 <= $maxZ) {
-                            $insideRegions[] = $existingRegion['name'];
-                            continue;
-                        }
-                        
-                        $overlappingRegions[] = $existingRegion['name'];
-                    }
+                if ($x1 >= $eMinX && $x2 <= $eMaxX &&
+                    $y1 >= $eMinY && $y2 <= $eMaxY &&
+                    $z1 >= $eMinZ && $z2 <= $eMaxZ) {
+                    $insideRegions[] = $existingRegion['name'];
+                    continue;
                 }
                 
-                if (!empty($overlappingRegions)) {
-                    return "Region overlaps with existing regions: " . implode(", ", $overlappingRegions);
+                if ($eMinX >= $x1 && $eMaxX <= $x2 &&
+                    $eMinY >= $y1 && $eMaxY <= $y2 &&
+                    $eMinZ >= $z1 && $eMaxZ <= $z2) {
+                    $insideRegions[] = $existingRegion['name'];
+                    continue;
                 }
                 
-                $regionNameEscaped = SQLite3::escapeString($regionName);
-                $ownerEscaped = SQLite3::escapeString($issuer->username);
-                $worldEscaped = SQLite3::escapeString($worldName);
-                
-                $this->db->exec("INSERT INTO regions (name, owner, members, world, x1, y1, z1, x2, y2, z2, pvp, use, break) VALUES ('$regionNameEscaped', '$ownerEscaped', '', '$worldEscaped', $x1, $y1, $z1, $x2, $y2, $z2, 1, 1, 1);");
-                
-                $message = "Region '$regionName' claimed in world '$worldName'.";
-                if (!empty($insideRegions)) {
-                    $message .= "\nRegion is inside: " . implode(", ", $insideRegions);
-                    $message .= "\nUse /rg setparent $regionName <parent> to set parent.";
-                }
-                
-                return $message;
-            } else {
-                return "Please set positions 1 and 2.";
+                $overlappingRegions[] = $existingRegion['name'];
             }
         }
-        return "Usage: /rg claim <region>";
+        
+        if (!empty($overlappingRegions)) {
+            return "Region overlaps with existing regions: " . implode(", ", $overlappingRegions);
+        }
+        
+        $regionNameEscaped = SQLite3::escapeString($regionName);
+        $ownerEscaped = SQLite3::escapeString($issuer->username);
+        
+        $checkResult = $this->db->query("SELECT name FROM regions WHERE name = '$regionNameEscaped';");
+        if ($checkResult->fetchArray()) {
+            return "Region '$regionName' already exists.";
+        }
+        
+        $this->db->exec("INSERT INTO regions (name, owner, members, world, x1, y1, z1, x2, y2, z2, pvp, use_flag, break_flag) VALUES ('$regionNameEscaped', '$ownerEscaped', '', '$worldEscaped', $x1, $y1, $z1, $x2, $y2, $z2, 1, 0, 0);");
+        
+        unset($this->pos1);
+        unset($this->pos2);
+        
+        $volume = ($x2 - $x1 + 1) * ($y2 - $y1 + 1) * ($z2 - $z1 + 1);
+        $message = "Region '$regionName' claimed ($x1,$y1,$z1 - $x2,$y2,$z2) Volume: $volume blocks.";
+        if (!empty($insideRegions)) {
+            $message .= "\nRegion is inside: " . implode(", ", $insideRegions);
+            $message .= "\nUse /rg setparent $regionName <parent> to set parent.";
+        }
+        
+        return $message;
     }
     
     private function removeRegion($issuer, $params) {
         $regionName = array_shift($params);
-        if ($regionName) {
-            $regionNameEscaped = SQLite3::escapeString($regionName);
-            $ownerEscaped = SQLite3::escapeString($issuer->username);
-            
-            $result = $this->db->query("SELECT * FROM regions WHERE name = '$regionNameEscaped';");
-            $region = $result->fetchArray(SQLITE3_ASSOC);
-            
-            if (!$region) {
-                return "Region '$regionName' not found.";
-            }
-            
-            if ($region['owner'] !== $issuer->username) {
-                return "You are not the owner of this region.";
-            }
-            
-            $childrenResult = $this->db->query("SELECT COUNT(*) as count FROM regions WHERE parent = '$regionNameEscaped';");
-            $children = $childrenResult->fetchArray(SQLITE3_ASSOC);
-            
-            if ($children['count'] > 0) {
-                return "Cannot remove region '$regionName' because it has child regions. Remove children first.";
-            }
-            
-            $this->db->exec("DELETE FROM regions WHERE name = '$regionNameEscaped' AND owner = '$ownerEscaped';");
-            return "Region '$regionName' removed.";
+        if (!$regionName) {
+            return "Usage: /rg remove <region>";
         }
-        return "Usage: /rg remove <region>";
+        
+        $regionNameEscaped = SQLite3::escapeString($regionName);
+        $result = $this->db->query("SELECT * FROM regions WHERE name = '$regionNameEscaped';");
+        $region = $result->fetchArray(SQLITE3_ASSOC);
+        
+        if (!$region) return "Region '$regionName' not found.";
+        if ($region['owner'] !== $issuer->username) return "You are not the owner of this region.";
+        
+        $childrenResult = $this->db->query("SELECT COUNT(*) as count FROM regions WHERE parent = '$regionNameEscaped';");
+        $children = $childrenResult->fetchArray(SQLITE3_ASSOC);
+        
+        if ($children['count'] > 0) {
+            return "Cannot remove region '$regionName' because it has child regions. Remove children first.";
+        }
+        
+        $ownerEscaped = SQLite3::escapeString($issuer->username);
+        $this->db->exec("DELETE FROM regions WHERE name = '$regionNameEscaped' AND owner = '$ownerEscaped';");
+        return "Region '$regionName' removed.";
     }
     
     public function infoCommand($issuer, $params) {
         $regionName = array_shift($params);
         if ($regionName) {
-            $result = $this->db->query("SELECT * FROM regions WHERE name = '$regionName';");
+            $regionNameEscaped = SQLite3::escapeString($regionName);
+            $result = $this->db->query("SELECT * FROM regions WHERE name = '$regionNameEscaped';");
             $region = $result->fetchArray(SQLITE3_ASSOC);
             if ($region) {
-                $parentInfo = $region['parent'] ? "Parent: {$region['parent']}\n" : "Parent: None\n";
-                $flags = "Flags: pvp=" . ($region['pvp'] ? "true" : "false") . ", use=" . ($region['use'] ? "true" : "false") . ", break=" . ($region['break'] ? "true" : "false");
-                return "Region: {$region['name']}\nOwner: {$region['owner']}\nMembers: {$region['members']}\nWorld: {$region['world']}\nCoordinates: ({$region['x1']}, {$region['y1']}, {$region['z1']}) - ({$region['x2']}, {$region['y2']}, {$region['z2']})\n$parentInfo$flags";
-            } else {
-                return "Region '$regionName' not found.";
+                return $this->formatRegionInfo($region);
             }
-        } else {
-            $playerPosition = $issuer->entity;
-            $region = $this->getRegionAtPosition(
-                $playerPosition->x, 
-                $playerPosition->y, 
-                $playerPosition->z, 
-                $playerPosition->level->getName()
-            );
-            
-            if ($region) {
-                $parentInfo = $region['parent'] ? "Parent: {$region['parent']}\n" : "";
-                $flags = "Flags: pvp=" . ($region['pvp'] ? "true" : "false") . ", use=" . ($region['use'] ? "true" : "false") . ", break=" . ($region['break'] ? "true" : "false");
-                return "You are in region: {$region['name']}\nOwner: {$region['owner']}\nMembers: {$region['members']}\nWorld: {$region['world']}\n$parentInfo$flags";
-            } else {
-                return "You are not in any region.";
-            }
+            return "Region '$regionName' not found.";
         }
+        
+        $region = $this->getRegionAtPosition(
+            $issuer->entity->x, 
+            $issuer->entity->y, 
+            $issuer->entity->z, 
+            $issuer->entity->level->getName()
+        );
+        
+        if ($region) {
+            return "You are in region:\n" . $this->formatRegionInfo($region);
+        }
+        return "You are not in any region.";
+    }
+    
+    private function formatRegionInfo($region) {
+        $parentInfo = $region['parent'] ? "Parent: {$region['parent']}" : "Parent: None";
+        $pvp = $region['pvp'] ? "true" : "false";
+        $use = $region['use_flag'] ? "true" : "false";
+        $brk = $region['break_flag'] ? "true" : "false";
+        $volume = $this->getRegionVolume($region);
+        
+        return "Region: {$region['name']}\n" .
+               "Owner: {$region['owner']}\n" .
+               "Members: " . ($region['members'] ?: "None") . "\n" .
+               "World: {$region['world']}\n" .
+               "Coordinates: ({$region['x1']}, {$region['y1']}, {$region['z1']}) - ({$region['x2']}, {$region['y2']}, {$region['z2']})\n" .
+               "Volume: $volume blocks\n" .
+               "$parentInfo\n" .
+               "Flags: pvp=$pvp, use=$use, break=$brk";
     }
     
     private function flagCommand(Player $issuer, $params) {
         if (count($params) < 3) {
-            return "Usage: /rg flag <region> <flag> <value>";
+            return "Usage: /rg flag <region> <flag> <value>\nValid flags: pvp, use, break";
         }
         
         $regionName = array_shift($params);
         $flag = strtolower(array_shift($params));
         $value = strtolower(array_shift($params));
         
-        $validFlags = ["pvp", "use", "break"];
-        $validValues = ["true", "false", "on", "off", "1", "0"];
+        $flagMap = [
+            "pvp" => "pvp",
+            "use" => "use_flag",
+            "break" => "break_flag"
+        ];
         
-        if (!in_array($flag, $validFlags)) {
+        if (!isset($flagMap[$flag])) {
             return "Invalid flag. Valid flags: pvp, use, break.";
         }
         
+        $validValues = ["true", "false", "on", "off", "1", "0"];
         if (!in_array($value, $validValues)) {
             return "Invalid value. Use true/false, on/off, or 1/0.";
         }
@@ -515,127 +523,134 @@ class WorldGuard implements Plugin {
         $result = $this->db->query("SELECT * FROM regions WHERE name = '$regionNameEscaped';");
         $region = $result->fetchArray(SQLITE3_ASSOC);
         
-        if (!$region) {
-            return "Region '$regionName' not found.";
-        }
+        if (!$region) return "Region '$regionName' not found.";
+        if ($region['owner'] !== $issuer->username) return "You are not the owner of this region.";
         
-        if ($region['owner'] !== $issuer->username) {
-            return "You are not the owner of this region.";
-        }
+        $columnName = $flagMap[$flag];
+        $this->db->exec("UPDATE regions SET $columnName = $intValue WHERE name = '$regionNameEscaped';");
         
-        $flagEscaped = SQLite3::escapeString($flag);
-        $this->db->exec("UPDATE regions SET \"$flagEscaped\" = $intValue WHERE name = '$regionNameEscaped';");
-        
-        return "Flag '$flag' set to ".($intValue ? "true" : "false")." for region '$regionName'.";
-    }
-    
-    private function setPos1($issuer) {
-        $this->pos1 = [round($issuer->entity->x)-0.5, round($issuer->entity->y)-1, round($issuer->entity->z)-0.5];
-        return "Position 1 set to " . (round($issuer->entity->x) - 0.5) . ", " . (round($issuer->entity->y) - 1) . ", " . (round($issuer->entity->z) - 0.5) . ".";
-    }
-    
-    private function setPos2($issuer) {
-        $this->pos2 = [round($issuer->entity->x)-0.5, round($issuer->entity->y)-1, round($issuer->entity->z)-0.5];
-        return "Position 2 set to " . (round($issuer->entity->x) - 0.5) . ", " . (round($issuer->entity->y) - 1) . ", " . (round($issuer->entity->z) - 0.5) . ".";
+        return "Flag '$flag' set to " . ($intValue ? "true" : "false") . " for region '$regionName'.";
     }
     
     private function listRegions($issuer) {
-        $worldName = $issuer->entity->level->getName();
+        $worldName = SQLite3::escapeString($issuer->entity->level->getName());
         $result = $this->db->query("SELECT * FROM regions WHERE world = '$worldName';");
         $regions = [];
         while ($region = $result->fetchArray(SQLITE3_ASSOC)) {
             $parentInfo = $region['parent'] ? " (Parent: " . $region['parent'] . ")" : "";
             $regions[] = $region['name'] . $parentInfo;
         }
-        return count($regions) > 0 ? "Regions in this world: " . implode(", ", $regions) : "No regions found in this world.";
+        return count($regions) > 0 ? "Regions in this world:\n" . implode("\n", $regions) : "No regions found in this world.";
     }
     
     private function addOwnerCommand($issuer, $params) {
         $regionName = array_shift($params);
         $newOwner = array_shift($params);
-        if ($regionName && $newOwner) {
-            $result = $this->db->query("SELECT * FROM regions WHERE name = '$regionName';");
-            $region = $result->fetchArray(SQLITE3_ASSOC);
-            if ($region && $region['owner'] === $issuer->username) {
-                $members = explode(',', $region['members']);
-                if (!in_array($newOwner, $members) && $newOwner !== $region['owner']) {
-                    $members[] = $newOwner;
-                    $this->db->exec("UPDATE regions SET members = '" . implode(',', $members) . "' WHERE name = '$regionName';");
-                    return "Added $newOwner as an owner to region '$regionName'.";
-                } else {
-                    return "$newOwner is already an owner or member of this region.";
-                }
-            } else {
-                return "You are not the owner of this region or the region does not exist.";
-            }
+        if (!$regionName || !$newOwner) {
+            return "Usage: /rg addowner <region> <player>";
         }
-        return "Usage: /rg addowner <region> <player>";
+        
+        $regionNameEscaped = SQLite3::escapeString($regionName);
+        $result = $this->db->query("SELECT * FROM regions WHERE name = '$regionNameEscaped';");
+        $region = $result->fetchArray(SQLITE3_ASSOC);
+        
+        if (!$region || $region['owner'] !== $issuer->username) {
+            return "You are not the owner of this region or the region does not exist.";
+        }
+        
+        $members = array_filter(explode(',', $region['members']));
+        if (in_array($newOwner, $members) || $newOwner === $region['owner']) {
+            return "$newOwner is already an owner or member of this region.";
+        }
+        
+        $members[] = $newOwner;
+        $membersStr = SQLite3::escapeString(implode(',', $members));
+        $this->db->exec("UPDATE regions SET members = '$membersStr' WHERE name = '$regionNameEscaped';");
+        return "Added $newOwner as an owner to region '$regionName'.";
     }
     
     private function removeOwnerCommand($issuer, $params) {
         $regionName = array_shift($params);
         $ownerToRemove = array_shift($params);
-        if ($regionName && $ownerToRemove) {
-            $result = $this->db->query("SELECT * FROM regions WHERE name = '$regionName';");
-            $region = $result->fetchArray(SQLITE3_ASSOC);
-            if ($region && $region['owner'] === $issuer->username) {
-                $members = explode(',', $region['members']);
-                if (in_array($ownerToRemove, $members)) {
-                    $members = array_diff($members, [$ownerToRemove]);
-                    $this->db->exec("UPDATE regions SET members = '" . implode(',', $members) . "' WHERE name = '$regionName';");
-                    return "Removed $ownerToRemove from owners of region '$regionName'.";
-                } else {
-                    return "$ownerToRemove is not a member of this region.";
-                }
-            } else {
-                return "You are not the owner of this region or the region does not exist.";
-            }
+        if (!$regionName || !$ownerToRemove) {
+            return "Usage: /rg removeowner <region> <player>";
         }
-        return "Usage: /rg removeowner <region> <player>";
+        
+        $regionNameEscaped = SQLite3::escapeString($regionName);
+        $result = $this->db->query("SELECT * FROM regions WHERE name = '$regionNameEscaped';");
+        $region = $result->fetchArray(SQLITE3_ASSOC);
+        
+        if (!$region || $region['owner'] !== $issuer->username) {
+            return "You are not the owner of this region or the region does not exist.";
+        }
+        
+        $members = array_filter(explode(',', $region['members']));
+        if (!in_array($ownerToRemove, $members)) {
+            return "$ownerToRemove is not a member of this region.";
+        }
+        
+        $members = array_diff($members, [$ownerToRemove]);
+        $membersStr = SQLite3::escapeString(implode(',', $members));
+        $this->db->exec("UPDATE regions SET members = '$membersStr' WHERE name = '$regionNameEscaped';");
+        return "Removed $ownerToRemove from owners of region '$regionName'.";
     }
     
     private function addMemberCommand($issuer, $params) {
         $regionName = array_shift($params);
         $newMember = array_shift($params);
-        if ($regionName && $newMember) {
-            $result = $this->db->query("SELECT * FROM regions WHERE name = '$regionName';");
-            $region = $result->fetchArray(SQLITE3_ASSOC);
-            if ($region && $region['owner'] === $issuer->username) {
-                $members = explode(',', $region['members']);
-                if (!in_array($newMember, $members)) {
-                    $members[] = $newMember;
-                    $this->db->exec("UPDATE regions SET members = '" . implode(',', $members) . "' WHERE name = '$regionName';");
-                    return "Added $newMember as a member to region '$regionName'.";
-                } else {
-                    return "$newMember is already a member of this region.";
-                }
-            } else {
-                return "You are not the owner of this region or the region does not exist.";
-            }
+        if (!$regionName || !$newMember) {
+            return "Usage: /rg addmember <region> <player>";
         }
-        return "Usage: /rg addmember <region> <player>";
+        
+        $regionNameEscaped = SQLite3::escapeString($regionName);
+        $result = $this->db->query("SELECT * FROM regions WHERE name = '$regionNameEscaped';");
+        $region = $result->fetchArray(SQLITE3_ASSOC);
+        
+        if (!$region || $region['owner'] !== $issuer->username) {
+            return "You are not the owner of this region or the region does not exist.";
+        }
+        
+        $members = array_filter(explode(',', $region['members']));
+        if (in_array($newMember, $members)) {
+            return "$newMember is already a member of this region.";
+        }
+        
+        $members[] = $newMember;
+        $membersStr = SQLite3::escapeString(implode(',', $members));
+        $this->db->exec("UPDATE regions SET members = '$membersStr' WHERE name = '$regionNameEscaped';");
+        return "Added $newMember as a member to region '$regionName'.";
     }
     
     private function removeMemberCommand($issuer, $params) {
         $regionName = array_shift($params);
         $memberToRemove = array_shift($params);
-        if ($regionName && $memberToRemove) {
-            $result = $this->db->query("SELECT * FROM regions WHERE name = '$regionName';");
-            $region = $result->fetchArray(SQLITE3_ASSOC);
-            if ($region && $region['owner'] === $issuer->username) {
-                $members = explode(',', $region['members']);
-                if (in_array($memberToRemove, $members)) {
-                    $members = array_diff($members, [$memberToRemove]);
-                    $this->db->exec("UPDATE regions SET members = '" . implode(',', $members) . "' WHERE name = '$regionName';");
-                    return "Removed $memberToRemove from members of region '$regionName'.";
-                } else {
-                    return "$memberToRemove is not a member of this region.";
-                }
-            } else {
-                return "You are not the owner of this region or the region does not exist.";
-            }
+        if (!$regionName || !$memberToRemove) {
+            return "Usage: /rg removemember <region> <player>";
         }
-        return "Usage: /rg removemember <region> <player>";
+        
+        $regionNameEscaped = SQLite3::escapeString($regionName);
+        $result = $this->db->query("SELECT * FROM regions WHERE name = '$regionNameEscaped';");
+        $region = $result->fetchArray(SQLITE3_ASSOC);
+        
+        if (!$region || $region['owner'] !== $issuer->username) {
+            return "You are not the owner of this region or the region does not exist.";
+        }
+        
+        $members = array_filter(explode(',', $region['members']));
+        if (!in_array($memberToRemove, $members)) {
+            return "$memberToRemove is not a member of this region.";
+        }
+        
+        $members = array_diff($members, [$memberToRemove]);
+        $membersStr = SQLite3::escapeString(implode(',', $members));
+        $this->db->exec("UPDATE regions SET members = '$membersStr' WHERE name = '$regionNameEscaped';");
+        return "Removed $memberToRemove from members of region '$regionName'.";
+    }
+    
+    private function isPlayerAllowed($playerName, $region) {
+        if ($region['owner'] === $playerName) return true;
+        $members = array_filter(explode(',', $region['members']));
+        return in_array($playerName, $members);
     }
     
     public function handleBlockTouch($data, $event) {
@@ -643,12 +658,10 @@ class WorldGuard implements Plugin {
         $target = $data["target"];
         $region = $this->getRegionAtPosition($target->x, $target->y, $target->z, $player->level->getName());
         
-        if ($region) {
-            if ($region['owner'] !== $player->username && !in_array($player->username, explode(',', $region['members']))) {
-                if (!$region['use']) {
-                    $player->sendChat("You do not have permission to use blocks in this region.");
-                    return false;
-                }
+        if ($region && !$this->isPlayerAllowed($player->username, $region)) {
+            if (!$region['use_flag']) {
+                $player->sendChat("[WorldGuard] You cannot use blocks in region '{$region['name']}'.");
+                return false;
             }
         }
         return true;
@@ -659,12 +672,10 @@ class WorldGuard implements Plugin {
         $target = $data["target"];
         $region = $this->getRegionAtPosition($target->x, $target->y, $target->z, $player->level->getName());
         
-        if ($region) {
-            if ($region['owner'] !== $player->username && !in_array($player->username, explode(',', $region['members']))) {
-                if (!$region['break']) {
-                    $player->sendChat("You do not have permission to place blocks in this region.");
-                    return false;
-                }
+        if ($region && !$this->isPlayerAllowed($player->username, $region)) {
+            if (!$region['break_flag']) {
+                $player->sendChat("[WorldGuard] You cannot place blocks in region '{$region['name']}'.");
+                return false;
             }
         }
         return true;
@@ -675,12 +686,10 @@ class WorldGuard implements Plugin {
         $target = $data["target"];
         $region = $this->getRegionAtPosition($target->x, $target->y, $target->z, $player->level->getName());
         
-        if ($region) {
-            if ($region['owner'] !== $player->username && !in_array($player->username, explode(',', $region['members']))) {
-                if (!$region['break']) {
-                    $player->sendChat("You do not have permission to break blocks in this region.");
-                    return false;
-                }
+        if ($region && !$this->isPlayerAllowed($player->username, $region)) {
+            if (!$region['break_flag']) {
+                $player->sendChat("[WorldGuard] You cannot break blocks in region '{$region['name']}'.");
+                return false;
             }
         }
         return true;
@@ -693,12 +702,10 @@ class WorldGuard implements Plugin {
         if ($target instanceof Block) {
             $region = $this->getRegionAtPosition($target->x, $target->y, $target->z, $player->level->getName());
             
-            if ($region) {
-                if ($region['owner'] !== $player->username && !in_array($player->username, explode(',', $region['members']))) {
-                    if (!$region['use']) {
-                        $player->sendChat("You do not have permission to interact with blocks in this region.");
-                        return false;
-                    }
+            if ($region && !$this->isPlayerAllowed($player->username, $region)) {
+                if (!$region['use_flag']) {
+                    $player->sendChat("[WorldGuard] You cannot interact in region '{$region['name']}'.");
+                    return false;
                 }
             }
         }
@@ -713,19 +720,21 @@ class WorldGuard implements Plugin {
             $region1 = $this->getRegionAtPosition($player->x, $player->y, $player->z, $player->level->getName());
             $region2 = $this->getRegionAtPosition($target->x, $target->y, $target->z, $target->level->getName());
             
-            if ($region1 && $region2) {
-                if ($region1['name'] === $region2['name']) {
-                    if (!$region1['pvp']) {
-                        $player->sendChat("PVP is disabled in this region.");
-                        return false;
-                    }
-                }
+            if ($region1 && !$region1['pvp']) {
+                $player->sendChat("[WorldGuard] PVP is disabled in region '{$region1['name']}'.");
+                return false;
+            }
+            if ($region2 && !$region2['pvp']) {
+                $player->sendChat("[WorldGuard] PVP is disabled in region '{$region2['name']}'.");
+                return false;
             }
         }
         return true;
     }
     
     public function __destruct() {
-        $this->db->close();
+        if (isset($this->db)) {
+            $this->db->close();
+        }
     }
 }

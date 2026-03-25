@@ -31,13 +31,13 @@ class AutoMine implements Plugin {
         
         $this->api->ban->cmdWhitelist('automine');
 
-        $this->api->addHandler("player.block.break", array($this, "onBlockBreak"));
+        $this->api->addHandler("player.block.place", array($this, "onBlockPlace"));
         
         foreach (array_keys($this->mines) as $mineName) {
             $this->scheduleReset($mineName);
         }
     }
-
+    
     private function loadConfig() {
         $this->config = new Config($this->path . "config.yml", CONFIG_YAML, [
             "ores" => [
@@ -63,14 +63,14 @@ class AutoMine implements Plugin {
         $this->config->save();
     }
 
-    public function onBlockBreak($data, $event) {
+    public function onBlockPlace($data, $event) {
         $player = $data["player"];
-        $target = $data["target"];
+        $block = $data["block"];
         
         foreach ($this->mines as $name => $mine) {
-            if ($this->isInRegion($target->x, $target->y, $target->z, $mine, $player->level->getName())) {
+            if ($this->isInRegion($block->x, $block->y, $block->z, $mine, $player->level->getName())) {
                 if (!$this->api->ban->isOp($player->username)) {
-                    $player->sendChat("[AutoMine] You cannot break blocks in mine '$name'.");
+                    $player->sendChat("[AutoMine] You cannot place blocks in mine '$name'.");
                     return false;
                 }
             }
@@ -153,7 +153,7 @@ class AutoMine implements Plugin {
 
     private function setPos1($issuer) {
         $x = (int) floor($issuer->entity->x);
-        $y = (int) floor($issuer->entity->y) - 1;
+        $y = (int) floor($issuer->entity->y);
         $z = (int) floor($issuer->entity->z);
         
         $this->positions[$issuer->username]['pos1'] = [
@@ -167,7 +167,7 @@ class AutoMine implements Plugin {
 
     private function setPos2($issuer) {
         $x = (int) floor($issuer->entity->x);
-        $y = (int) floor($issuer->entity->y) - 1;
+        $y = (int) floor($issuer->entity->y);
         $z = (int) floor($issuer->entity->z);
         
         $this->positions[$issuer->username]['pos2'] = [
@@ -333,8 +333,19 @@ class AutoMine implements Plugin {
         }
 
         if (isset($this->mines[$name])) {
-            $this->fillMine($this->mines[$name]);
-            $this->api->chat->broadcast("[AutoMine] Mine '$name' has been reset!");
+            $mine = $this->mines[$name];
+            $level = $this->api->level->get($mine['world']);
+            
+            if (!$level) {
+                $this->scheduleReset($name);
+                return;
+            }
+            
+            $this->fillMine($mine);
+            
+            foreach ($this->api->player->getAll($level) as $player) {
+                $player->sendChat("[AutoMine] Mine '$name' has been reset!");
+            }
             $this->scheduleReset($name);
         }
     }

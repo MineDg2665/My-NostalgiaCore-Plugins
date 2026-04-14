@@ -3,10 +3,15 @@
 __PocketMine Plugin__
 name=NPC
 description=A plugin that adds custom NPCs
-version=1.2
+version=1.3
 author=MineDg
 class=NPCMain
 apiversion=12.1
+*/
+
+/*
+1.3       * Client crush fixed
+1.1 - 1.2 * Bugs fixed
 */
 
 class NPCMain implements Plugin {

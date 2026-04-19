@@ -472,4 +472,4 @@ class NPCEntity extends Zombie {
             "speedZ" => 0,
         ];
     }
-}ф
+}

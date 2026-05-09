@@ -40,43 +40,41 @@ class AutoWorldsUnloader implements Plugin {
         $this->api->schedule(40, array($this, "checkWorlds"), array(), false);
     }
 
-    public function checkWorlds() {
-        $defaultLevel = $this->api->level->getDefault();
-        $protectedWorlds = $this->config->get("protected-worlds");
+	public function checkWorlds() {
+		$defaultLevel = $this->api->level->getDefault();
+		$protectedWorlds = $this->config->get("protected-worlds");
 
-        if (!is_array($protectedWorlds)) {
-            $protectedWorlds = array("world");
-        }
+		if (!is_array($protectedWorlds)) {
+			$protectedWorlds = array("world");
+		}
 
-        $levels = $this->api->level->getLevels();
-        $toUnload = array();
+		$levels = $this->api->level->getAll();
+		$toUnload = array();
 
-        foreach ($levels as $level) {
-            if ($level === $defaultLevel) {
-                continue;
-            }
+		foreach ($levels as $name => $level) {
+			if ($level === $defaultLevel) {
+				continue;
+			}
 
-            $worldName = $level->getName();
+			if (in_array($name, $protectedWorlds)) {
+				continue;
+			}
 
-            if (in_array($worldName, $protectedWorlds)) {
-                continue;
-            }
+			$players = $level->players;
+			if (count($players) === 0) {
+				$toUnload[] = $level;
+			}
+		}
 
-            $players = $level->getPlayers();
-            if (count($players) === 0) {
-                $toUnload[] = $level;
-            }
-        }
-
-        foreach ($toUnload as $level) {
-            $this->unloadWorld($level);
-        }
-    }
+		foreach ($toUnload as $level) {
+			$this->unloadWorld($level);
+		}
+	}
 
     private function unloadWorld($level) {
         $worldName = $level->getName();
 
-        if (count($level->getPlayers()) > 0) {
+        if (count($level->players) > 0) {
             return false;
         }
 

@@ -22,7 +22,7 @@ class WorldGuard implements Plugin {
     private $db;
     private $positions = [];
     private $path;
-	private $interactableBlocks = [26,54,61,62,58,64,96,107,245,247];
+    private $interactableBlocks = [26,54,61,62,58,64,96,107,245,247];
     
     public function __construct(ServerAPI $api, $server = false) {
         $this->api = $api;
@@ -124,17 +124,17 @@ class WorldGuard implements Plugin {
     }
     
     private function setPos1($issuer) {
-        $x = (int) round($issuer->entity->x);
-        $y = (int) round($issuer->entity->y);
-        $z = (int) round($issuer->entity->z);
+        $x = (int) floor($issuer->entity->x);
+        $y = (int) floor($issuer->entity->y);
+        $z = (int) floor($issuer->entity->z);
         $this->positions[$issuer->username]['pos1'] = [$x, $y, $z];
         return "Position 1 set to $x, $y, $z.";
     }
     
     private function setPos2($issuer) {
-        $x = (int) round($issuer->entity->x);
-        $y = (int) round($issuer->entity->y);
-        $z = (int) round($issuer->entity->z);
+        $x = (int) floor($issuer->entity->x);
+        $y = (int) floor($issuer->entity->y);
+        $z = (int) floor($issuer->entity->z);
         $this->positions[$issuer->username]['pos2'] = [$x, $y, $z];
         return "Position 2 set to $x, $y, $z.";
     }
@@ -178,9 +178,9 @@ class WorldGuard implements Plugin {
     }
     
     private function getRegionAtPosition($x, $y, $z, $world) {
-        $bx = (int) round($x);
-        $by = (int) round($y);
-        $bz = (int) round($z);
+        $bx = (int) floor($x);
+        $by = (int) floor($y);
+        $bz = (int) floor($z);
         
         $allRegions = $this->getAllRegionsInWorld($world);
         
@@ -271,9 +271,9 @@ class WorldGuard implements Plugin {
         if ($this->api->ban->isOP($player->username) === true) return true;
 
         $region = $this->getRegionAtPosition(
-            $target->x,
-            $target->y,
-            $target->z,
+            (int) floor($target->x),
+            (int) floor($target->y),
+            (int) floor($target->z),
             $player->level->getName()
         );
 
@@ -311,8 +311,18 @@ class WorldGuard implements Plugin {
         if ($this->api->ban->isOP($player->username) === true) return true;
 
         if ($target instanceof Player) {
-            $region1 = $this->getRegionAtPosition($player->x, $player->y, $player->z, $player->level->getName());
-            $region2 = $this->getRegionAtPosition($target->x, $target->y, $target->z, $target->level->getName());
+            $region1 = $this->getRegionAtPosition(
+                (int) floor($player->x),
+                (int) floor($player->y),
+                (int) floor($player->z),
+                $player->level->getName()
+            );
+            $region2 = $this->getRegionAtPosition(
+                (int) floor($target->x),
+                (int) floor($target->y),
+                (int) floor($target->z),
+                $target->level->getName()
+            );
 
             if ($region1) {
                 if ($this->isPlayerOwner($player->username, $region1) || $this->isPlayerMember($player->username, $region1)) {
@@ -461,9 +471,9 @@ class WorldGuard implements Plugin {
         }
         
         $region = $this->getRegionAtPosition(
-            $issuer->entity->x,
-            $issuer->entity->y,
-            $issuer->entity->z,
+            (int) floor($issuer->entity->x),
+            (int) floor($issuer->entity->y),
+            (int) floor($issuer->entity->z),
             $issuer->entity->level->getName()
         );
         
@@ -738,9 +748,9 @@ class WorldGuard implements Plugin {
     }
     
     private function regionsAtCommand(Player $issuer, $params) {
-        $x = (int) round($issuer->entity->x);
-        $y = (int) round($issuer->entity->y);
-        $z = (int) round($issuer->entity->z);
+        $x = (int) floor($issuer->entity->x);
+        $y = (int) floor($issuer->entity->y);
+        $z = (int) floor($issuer->entity->z);
         $world = $issuer->entity->level->getName();
         
         $allRegions = $this->getAllRegionsInWorld($world);

@@ -3,13 +3,14 @@
 __PocketMine Plugin__
 name=NPC
 description=A plugin that adds custom NPCs
-version=1.3
+version=1.4
 author=MineDg
 class=NPCMain
-apiversion=12.1
+apiversion=12.2
 */
 
 /*
+1.4       * Fixed for API 12.2 core compatibility
 1.3       * Client crush fixed
 1.1 - 1.2 * Bugs fixed
 */
@@ -133,7 +134,8 @@ class NPCMain implements Plugin {
             $entity->pitch = $pitch;
             $entity->headYaw = $yaw;
 
-            $players = $this->api->player->getAll($entity->level);
+            // Use level->players directly instead of api->player->getAll()
+            $players = $entity->level->players;
             foreach ($players as $player) {
                 if (!$player->eid || $player->spawned !== true) continue;
 
@@ -158,7 +160,7 @@ class NPCMain implements Plugin {
         $nearest = null;
         $nearestDistSq = $radius * $radius;
 
-        $players = $this->api->player->getAll($entity->level);
+        $players = $entity->level->players;
         foreach ($players as $player) {
             if (!isset($player->entity) || $player->entity === false) continue;
             if ($player->spawned !== true) continue;
@@ -404,13 +406,17 @@ class NPCEntity extends Zombie {
         $this->npcData = $data;
         $this->setName($data["name"] ?? "NPC");
         $this->crouched = $data["crouched"] ?? false;
-        $this->check = false;
-        $this->needsUpdate = false;
-        $this->canBeAttacked = true;
-        $this->dead = false;
+        $this->hasGravity = false;
+        $this->speed = 0;
         $this->speedX = 0;
         $this->speedY = 0;
         $this->speedZ = 0;
+        $this->hasKnockback = false;
+        $this->invincible = true;
+        $this->canBeAttacked = true;
+        $this->dead = false;
+        $this->fire = 0;
+        $this->check = true;
     }
 
     public function spawn($player) {
@@ -421,6 +427,10 @@ class NPCEntity extends Zombie {
         if ($player->eid === $this->eid) return false;
         if ($this->closed !== false) return false;
         if ($player->level !== $this->level) return false;
+
+        if (!$player->hasEntity($this)) {
+            $player->addEntity($this);
+        }
 
         $pk = new AddPlayerPacket();
         $pk->clientID = 0;
@@ -435,16 +445,19 @@ class NPCEntity extends Zombie {
         $pk->itemAuxValue = 0;
         $pk->metadata = $this->getMetadata();
         $player->dataPacket($pk);
+
+        $this->sendLinkPackets($player);
     }
 
     public function update($now) {
+        if ($this->closed === true) {
+            return false;
+        }
         $this->lastUpdate = $now;
+        ++$this->counter;
+        $this->counterUpdate();
         return false;
     }
-
-    public function updateBurning() {}
-
-    public function updateEntityMovement() {}
 
     public function harm($dmg, $cause = "generic", $force = false) {
         if (is_numeric($cause)) {

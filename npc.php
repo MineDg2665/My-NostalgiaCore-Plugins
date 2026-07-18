@@ -134,7 +134,6 @@ class NPCMain implements Plugin {
             $entity->pitch = $pitch;
             $entity->headYaw = $yaw;
 
-            // Use level->players directly instead of api->player->getAll()
             $players = $entity->level->players;
             foreach ($players as $player) {
                 if (!$player->eid || $player->spawned !== true) continue;

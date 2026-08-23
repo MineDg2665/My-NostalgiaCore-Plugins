@@ -3,13 +3,14 @@
 __PocketMine Plugin__
 name=NPC
 description=A plugin that adds custom NPCs
-version=1.4
+version=1.5
 author=MineDg
 class=NPCMain
 apiversion=12.2
 */
 
 /*
+1.5       * Fixed NPC dublicating
 1.4       * Fixed for API 12.2 core compatibility
 1.3       * Client crush fixed
 1.1 - 1.2 * Bugs fixed
@@ -429,6 +430,8 @@ class NPCEntity extends Zombie {
 
         if (!$player->hasEntity($this)) {
             $player->addEntity($this);
+        } else {
+            return true;
         }
 
         $pk = new AddPlayerPacket();

@@ -14,7 +14,7 @@ class WorldGuard implements Plugin {
     private $db;
     private $positions = [];
     private $path;
-    private $interactableBlocks = [26,46,54,58,61,62,64,71,92,96,107,245,247];
+    private $interactableBlocks = [26,46,54,58,61,62,63,64,68,71,92,96,107,245,247];
     
     public function __construct(ServerAPI $api, $server = false) {
         $this->api = $api;
@@ -316,7 +316,12 @@ class WorldGuard implements Plugin {
                 }
             } elseif ($type === "place") {
                 $isInteraction = ($target->isActivable === true) || in_array($blockId, $this->interactableBlocks);
-                if (!$isInteraction && !$region['place_flag']) {
+                if ($isInteraction) {
+                    if (!$region['interact_flag']) {
+                        $player->sendChat("[WorldGuard] You are not allowed to interact in the '{$region['name']}' region.");
+                        return false;
+                    }
+                } elseif (!$region['place_flag']) {
                     $player->sendChat("[WorldGuard] You are not allowed to place blocks in the '{$region['name']}' region.");
                     return false;
                 }

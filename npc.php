@@ -3,13 +3,14 @@
 __PocketMine Plugin__
 name=NPC
 description=A plugin that adds custom NPCs
-version=1.5
+version=1.6
 author=MineDg
 class=NPCMain
 apiversion=12.2
 */
 
 /*
+1.6       * Fixed NPC ghosts in client player list on world change and respawn
 1.5       * Fixed NPC dublicating
 1.4       * Fixed for API 12.2 core compatibility
 1.3       * Client crush fixed
@@ -40,6 +41,7 @@ class NPCMain implements Plugin {
         }
 
         $this->api->addHandler("console.command.save-all", [$this, "save"]);
+        $this->api->addHandler("player.teleport.level", [$this, "onLevelSwitch"]);
         $this->api->console->register("npc", "<create|set|spawn|list|remove|respawn>", [$this, "handleNPCCommand"]);
 
         $this->api->schedule(60, [$this, "spawnAllNPCs"], []);
@@ -54,6 +56,23 @@ class NPCMain implements Plugin {
                 console("[NPC] NPC '$name' disappeared, respawning...");
                 unset($this->spawnedNPCs[$name]);
                 $this->spawnSingleNPC($name);
+            }
+        }
+    }
+
+    public function onLevelSwitch($data, $event) {
+        $player = $data["player"] ?? null;
+        $origin = $data["origin"] ?? null;
+        if (!($player instanceof Player) || !($origin instanceof Level)) {
+            return;
+        }
+
+        foreach ($origin->entityList as $e) {
+            if ($e instanceof NPCEntity && $player->hasEntity($e)) {
+                $pk = new RemovePlayerPacket();
+                $pk->clientID = 0;
+                $pk->eid = $e->eid;
+                $player->entityQueueDataPacket($pk);
             }
         }
     }
@@ -449,6 +468,20 @@ class NPCEntity extends Zombie {
         $player->dataPacket($pk);
 
         $this->sendLinkPackets($player);
+    }
+
+    public function close() {
+        if ($this->closed === false) {
+            foreach ($this->level->players as $player) {
+                if ($player->spawned === true and $player->hasEntity($this)) {
+                    $pk = new RemovePlayerPacket();
+                    $pk->clientID = 0;
+                    $pk->eid = $this->eid;
+                    $player->entityQueueDataPacket($pk);
+                }
+            }
+        }
+        parent::close();
     }
 
     public function update($now) {
